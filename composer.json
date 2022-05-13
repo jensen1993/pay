@@ -1,5 +1,5 @@
 {
-    "name": "jensen/pay",
+    "name": "jensenks/pay",
     "description": "this is a pay vendor",
     "type": "library",
     "require": {
@@ -12,7 +12,7 @@
     },
     "authors": [
         {
-            "name": "jensen",
+            "name": "jensenks",
             "email": "313125006@qq.com"
         }
     ],
