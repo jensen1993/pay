@@ -18,7 +18,9 @@ use Jensen\Pay\helper;
  */
 class SandePay
 {
-    private $config = [];
+    private $config = [
+        'payChannel' => 3,
+    ];
 
     public function __get($name)
     {
@@ -38,29 +40,24 @@ class SandePay
         if (!is_array($config) && !empty($config)) {
             throw new \Exception('请传入正确参数');
         }
-        if (empty($config['payChannel']) || empty($config['payType'])) {
-            throw new \Exception('请传入支付方式或支付渠道');
-        }
         if (empty($config['notifyUrl'])) {
             throw new \Exception('请写入回调地址');
         }
-        if (!empty($config['payChannel'] && $config['payChannel'] == 2)) {
-            if (empty($config['key1'])) {
-                throw new \Exception('请传入Key1');
-            }
-            if (empty($config['merNo'])) {
-                throw new \Exception('请传入merNo');
-            }
-            if (empty($config['md5key'])) {
-                throw new \Exception('请传入md5key');
-            }
+        if (empty($config['key1'])) {
+            throw new \Exception('请传入Key1');
+        }
+        if (empty($config['merNo'])) {
+            throw new \Exception('请传入merNo');
+        }
+        if (empty($config['md5key'])) {
+            throw new \Exception('请传入md5key');
         }
         if (!empty($config['payType'] && $config['payType'] == 3)) {
             if (empty($config['staticUrl'])) {
                 throw new \Exception('请传入staticUrl');
             }
         }
-        $this->config = $config;
+        $this->config = array_merge($this->config, $config);
     }
 
     /**
@@ -68,27 +65,22 @@ class SandePay
      * @param $amount
      * @param $name
      * @param $sn
+     * @param $uid
      * @return string
      * @throws \Exception
      * @Date : 2022/5/14 4:50
      * @Author : By Jensen
      */
-    public function getPayment($amount, $name, $sn)
+    public function getPayment($amount, $name, $sn, $uid)
     {
-        $channel = $this->payChannel;
         $payType = $this->payType;
-        if ($channel == 2) {
-            $return = self::HfPay($payType, $amount, $name, $sn);
-        } elseif ($channel == 3) {
-            $return = $this->SdPay($payType, $amount, $name, $sn);
-        } else {
-            throw new \Exception('支付渠道错误');
-        }
+        $return = $this->SdPay($uid, $payType, $amount, $name, $sn);
         return $return;
     }
 
     /**
      * @Explain : 根据支付方式选择支付
+     * @param $uid
      * @param $payType
      * @param $amount
      * @param $name
@@ -98,12 +90,14 @@ class SandePay
      * @Date : 2022/5/14 4:45
      * @Author : By Jensen
      */
-    public function SdPay($payType, $amount, $name, $sn)
+    private function SdPay($uid, $payType, $amount, $name, $sn)
     {
         if ($payType == 3) {
             return $this->Alipay($amount, $name, $sn);
         } elseif ($payType == 4) {
             return $this->WechatPay($amount, $name, $sn);
+        } elseif ($payType == 5) {
+            return $this->BankPay($uid, $amount, $name, $sn);
         }
         throw new \Exception('支付错误');
     }
@@ -117,7 +111,7 @@ class SandePay
      * @Date : 2022/5/14 4:43
      * @Author : By Jensen
      */
-    public function Alipay($amount, $name, $sn)
+    private function Alipay($amount, $name, $sn)
     {
         return $this->PayData($amount, $name, $sn, '02020002', 'alipayh5', '');
     }
@@ -131,9 +125,61 @@ class SandePay
      * @Date : 2022/5/14 4:42
      * @Author : By Jensen
      */
-    public function WechatPay($amount, $name, $sn)
+    private function WechatPay($amount, $name, $sn)
     {
         return $this->PayData($amount, $name, $sn, '02010006', 'applet', $this->staticUrl);
+    }
+
+    /**
+     * @Explain : 银行卡支付
+     * @param $uid
+     * @param $amount
+     * @param $name
+     * @param $sn
+     * @return string
+     * @throws \Exception
+     * @Date : 2022/5/14 下午10:05
+     * @Author : By Jensen
+     */
+    private function BankPay($uid, $amount, $name, $sn)
+    {
+        $price = bcmul($amount, 100, 0);
+        $len = strlen($price);
+        if ($len < 12) {
+            $price = self::getZero(12 - $len) . $price;
+        }
+        $data = array(
+            'head' => array(
+                'version' => '1.0',
+                'method' => 'sandPay.fastPay.quickPay.index',
+                'productId' => "00000016",
+                'accessType' => "1",
+                'mid' => $this->merNo,
+                'plMid' => "",
+                'channelType' => "07",
+                'reqTime' => date('YmdHis', time()),
+            ),
+            'body' => [
+                'userId' => $uid,
+                'orderCode' => $sn,
+                'orderTime' => date('YmdHis', time()),
+                'totalAmount' => $price,
+                'subject' => $name,
+                'body' => $name,
+                'currencyCode' => 156,
+                'notifyUrl' => $this->notifyUrl,
+                'frontUrl' => $this->returnUrl,
+            ],
+        );
+        $postData = array(
+            'charset' => 'utf-8',
+            'signType' => '01',
+            'data' => json_encode($data),
+            'sign' => self::sign($data),
+        );
+        $request = request();
+        $url = $request->root(true) . '/index/bank/index?shandeInfo=' . base64_encode(json_encode($postData));
+        return $url;
     }
 
     /**
@@ -148,7 +194,7 @@ class SandePay
      * @Date : 2022/5/14 4:41
      * @Author : By Jensen
      */
-    public function PayData($amount, $name, $sn, $productCode, $function, $wechat)
+    private function PayData($amount, $name, $sn, $productCode, $function, $wechat)
     {
         $ip = helper::getIp();
         $ip = str_replace('.', '_', $ip);
